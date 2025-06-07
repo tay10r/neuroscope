@@ -14,6 +14,13 @@ add_library(neuroscope_cpp
   src/microscope.cpp
   src/swc.h
   src/swc.cpp
+  src/tissue.h
+  src/tissue.cpp
+)
+
+target_include_directories(neuroscope_cpp
+  PUBLIC
+    src/deps
 )
 
 if(COMPILER_WARNINGS_ENABLED)

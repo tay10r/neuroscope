@@ -2,6 +2,9 @@
 
 #include "microscope.h"
 #include "swc.h"
+#include "tissue.h"
+
+#include <stdlib.h>
 
 namespace {
 
@@ -16,6 +19,11 @@ PYBIND11_MODULE(neuroscope, m)
     .def("x", [](const Vec3f& self) -> float { return self[0]; })
     .def("y", [](const Vec3f& self) -> float { return self[1]; })
     .def("z", [](const Vec3f& self) -> float { return self[2]; });
+
+  py::class_<Transform>(m, "Transform")
+    .def(py::init<Vec3f, Vec3f>(), py::arg("position") = Vec3f{}, py::arg("rotation") = Vec3f{})
+    .def_readwrite("position", &Transform::position)
+    .def_readwrite("rotation", &Transform::rotation);
 
   py::enum_<SWCType>(m, "SWCType")
     .value("UNDEFINED", SWCType::UNDEFINED)
@@ -48,43 +56,74 @@ PYBIND11_MODULE(neuroscope, m)
       }
     });
 
-  py::class_<Microscope>(m, "Microscope").def("capture", &Microscope::capture);
+  py::class_<Microscope>(m, "Microscope")
+    .def("capture", &Microscope::capture, py::arg("model"), py::arg("tissue"), py::arg("transform") = Transform{});
 
-  py::class_<DebugMicroscope, Microscope>(m, "DebugMicroscope")
-    .def(py::init<size_t, size_t, float, float>(),
+  py::class_<SegmentationMicroscope, Microscope>(m, "SegmentationMicroscope")
+    .def(py::init<size_t, size_t, float>(),
          py::arg("image_width") = 640,
          py::arg("image_height") = 480,
-         py::arg("vertical_fov") = 500,
-         py::arg("elevation") = 100)
+         py::arg("vertical_fov") = 500)
     .def("image_size",
-         [](const DebugMicroscope& self) -> py::tuple {
+         [](const SegmentationMicroscope& self) -> py::tuple {
            const auto& sensor = self.get_sensor();
            return py::make_tuple(sensor.width(), sensor.height());
          })
-    .def("copy_rgb_buffer", [](const DebugMicroscope& self) -> py::bytes {
+    .def("copy_rgb_buffer", [](const SegmentationMicroscope& self) -> py::bytes {
       auto& sensor = self.get_sensor();
       auto* data = sensor.get_array_data();
       auto size = sensor.get_array_size();
       return py::bytes(reinterpret_cast<const char*>(data), size);
     });
 
-  py::class_<GenericFluorescentMicroscope, Microscope>(m, "GenericFluorescentMicroscope")
-    .def(py::init<size_t, size_t, float, float, float>(),
+  py::class_<FluorescenceConfig>(m, "FluorescenceConfig")
+    .def(py::init<>())
+    .def_readwrite("seed", &FluorescenceConfig::seed)
+    .def_readwrite("min_emission", &FluorescenceConfig::min_emission)
+    .def_readwrite("max_emission", &FluorescenceConfig::max_emission);
+
+  py::class_<FluorescenceMicroscope, Microscope>(m, "FluorescenceMicroscope")
+    .def(py::init<size_t, size_t, float>(),
          py::arg("image_width") = 640,
          py::arg("image_height") = 480,
-         py::arg("vertical_fov") = 500,
-         py::arg("distance_per_slice") = 2.5F,
-         py::arg("axial_fwhm") = 2.0F)
+         py::arg("vertical_fov") = 500)
     .def("image_size",
-         [](const GenericFluorescentMicroscope& self) -> py::tuple {
+         [](const FluorescenceMicroscope& self) -> py::tuple {
            const auto& sensor = self.get_sensor();
            return py::make_tuple(sensor.width(), sensor.height());
          })
-    .def("copy_buffer", [](const GenericFluorescentMicroscope& self) -> py::bytes {
-      auto& sensor = self.get_sensor();
-      auto* data = sensor.get_array_data();
-      auto size = sensor.get_array_size();
-      return py::bytes(reinterpret_cast<const char*>(data), size);
-    });
-  ;
+    .def("copy_buffer",
+         [](const FluorescenceMicroscope& self) -> py::bytes {
+           auto& sensor = self.get_sensor();
+           auto* data = sensor.get_array_data();
+           auto size = sensor.get_array_size();
+           return py::bytes(reinterpret_cast<const char*>(data), size);
+         })
+    .def("set_config", &FluorescenceMicroscope::set_config, py::arg("config"));
+
+  py::class_<TissueConfig>(m, "TissueConfig")
+    .def(py::init<>())
+    .def_readwrite("seed", &TissueConfig::seed)
+    .def_readwrite("coverage", &TissueConfig::coverage)
+    .def_readwrite("max_density", &TissueConfig::max_density);
+
+  py::class_<Tissue>(m, "Tissue")
+    .def(py::init<>())
+    .def("set_config", &Tissue::set_config, py::arg("config"))
+    .def("density", &Tissue::density, py::arg("position"))
+    .def(
+      "render",
+      [](const Tissue& self, const ssize_t w, const ssize_t h, const float vertical_fov) -> py::bytes {
+        void* buffer = malloc(w * h);
+        if (!buffer) {
+          return py::none();
+        }
+        self.render(w, h, vertical_fov, static_cast<uint8_t*>(buffer));
+        auto result = py::bytes(static_cast<const char*>(buffer), w * h);
+        free(buffer);
+        return result;
+      },
+      py::arg("image_width"),
+      py::arg("image_height"),
+      py::arg("vertical_fov"));
 }

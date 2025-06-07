@@ -3,6 +3,15 @@
 #include <math.h>
 #include <stdlib.h>
 
+template<typename T>
+[[nodiscard]] constexpr auto
+clamp(T x, const T min_x, const T max_x) -> T
+{
+  x = (x < min_x) ? min_x : x;
+  x = (x > max_x) ? max_x : x;
+  return x;
+}
+
 template<typename T, size_t N>
 struct Vec final
 {
@@ -122,4 +131,13 @@ public:
   [[nodiscard]] auto operator[](const size_t i) const -> const T& { return elements_[i]; }
 
   [[nodiscard]] auto operator[](const size_t i) -> T& { return elements_[i]; }
+};
+
+struct Transform final
+{
+  Vec3f position;
+
+  Vec3f rotation;
+
+  [[nodiscard]] auto apply(const Vec3f& p) const -> Vec3f;
 };

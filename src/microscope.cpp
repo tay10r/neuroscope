@@ -3,8 +3,7 @@
 #include "random.h"
 #include "scene.h"
 #include "swc.h"
-
-#include <stdio.h>
+#include "tissue.h"
 
 MicroscopeBase::MicroscopeBase()
   : device_(rtcNewDevice(""))
@@ -17,8 +16,8 @@ MicroscopeBase::MicroscopeBase(MicroscopeBase&& other)
   rtcSetDeviceErrorFunction(
     device_,
     [](void*, RTCError, const char* what) {
-      printf("embree error: %s\n", what);
-      //
+      (void)what;
+      // TODO : log this
     },
     this);
 
@@ -39,28 +38,29 @@ MicroscopeBase::device() -> RTCDevice
 }
 
 auto
-MicroscopeBase::capture(const SWCModel& model) -> bool
+MicroscopeBase::capture(const SWCModel& model, const Tissue& tissue, const Transform& t) -> bool
 {
   Scene scene(device());
 
-  if (!scene.from_swc_model(model)) {
+  if (!scene.from_swc_model(model, t)) {
     return false;
   }
 
-  capture_impl(scene);
+  capture_impl(scene, tissue);
 
   return true;
 }
 
-DebugMicroscope::DebugMicroscope(size_t image_width, size_t image_height, float vertical_fov, float elevation)
+SegmentationMicroscope::SegmentationMicroscope(const size_t image_width,
+                                               const size_t image_height,
+                                               const float vertical_fov)
   : sensor_(image_width, image_height)
   , vertical_fov_(vertical_fov)
-  , elevation_(elevation)
 {
 }
 
 void
-DebugMicroscope::capture_impl(const Scene& scene)
+SegmentationMicroscope::capture_impl(const Scene& scene, const Tissue&)
 {
   const auto w = sensor_.width();
   const auto h = sensor_.height();
@@ -71,6 +71,7 @@ DebugMicroscope::capture_impl(const Scene& scene)
   const auto aspect{ static_cast<float>(w) / static_cast<float>(h) };
   const auto fov{ vertical_fov_ * 0.5F };
   const auto max_spp{ 16 };
+  const auto elevation{ 1.0e6F };
 
 #pragma omp parallel for
 
@@ -94,7 +95,7 @@ DebugMicroscope::capture_impl(const Scene& scene)
         const auto px = (u * 2.0F - 1.0F) * fov * aspect;
         const auto py = (v * 2.0F - 1.0F) * fov;
 
-        const auto isect = scene.intersect1(Vec3f{ px, py, elevation_ }, Vec3f{ 0, 0, -1 });
+        const auto isect = scene.intersect1(Vec3f{ px, py, elevation }, Vec3f{ 0, 0, -1 });
 
         if (isect.hit.geomID != RTC_INVALID_GEOMETRY_ID) {
           b = 0;
@@ -115,20 +116,24 @@ DebugMicroscope::capture_impl(const Scene& scene)
   }
 }
 
-GenericFluorescentMicroscope::GenericFluorescentMicroscope(size_t image_width,
-                                                           size_t image_height,
-                                                           float vertical_fov,
-                                                           float distance_per_slice,
-                                                           float axial_fwhm)
+FluorescenceMicroscope::FluorescenceMicroscope(size_t image_width, size_t image_height, float vertical_fov)
   : sensor_(image_width, image_height)
   , vertical_fov_(vertical_fov)
-  , distance_per_slice_(distance_per_slice)
-  , axial_fwhm_(axial_fwhm)
 {
+  fluorescence_.SetFrequency(0.1F);
+  fluorescence_.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+  fluorescence_.SetFractalType(FastNoiseLite::FractalType_Ridged);
+  fluorescence_.SetFractalOctaves(4);
 }
 
 void
-GenericFluorescentMicroscope::capture_impl(const Scene& scene)
+FluorescenceMicroscope::set_config(const FluorescenceConfig& config)
+{
+  config_ = config;
+}
+
+void
+FluorescenceMicroscope::capture_impl(const Scene& scene, const Tissue& tissue)
 {
   const auto w = sensor_.width();
   const auto h = sensor_.height();
@@ -168,10 +173,18 @@ GenericFluorescentMicroscope::capture_impl(const Scene& scene)
 
         const auto isect = scene.intersect1(ray_org, ray_dir);
 
-        if (isect.hit.geomID == RTC_INVALID_GEOMETRY_ID)
+        if (isect.hit.geomID == RTC_INVALID_GEOMETRY_ID) {
+          intensity_sum += tissue.density(Vec2f{ px, py });
           continue;
+        }
 
-        intensity_sum += 1.0F - isect.ray.tfar * z_scale;
+        const Vec3f hit_pos = ray_org + ray_dir * isect.ray.tfar;
+
+        const float distance_intensity = 1.0F - isect.ray.tfar * z_scale;
+
+        const float emission = fluorescence_.GetNoise(hit_pos[0], hit_pos[1], hit_pos[2]) * 0.5F + 0.5F;
+
+        intensity_sum += distance_intensity * clamp(emission, config_.min_emission, config_.max_emission);
       }
 
       const float intensity_avg = intensity_sum * (1.0F / static_cast<float>(spp));

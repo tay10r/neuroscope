@@ -37,7 +37,7 @@ public:
 
   ~Scene();
 
-  [[nodiscard]] auto from_swc_model(const SWCModel& model) -> bool;
+  [[nodiscard]] auto from_swc_model(const SWCModel& model, const Transform& t) -> bool;
 
   [[nodiscard]] auto is_neurite(const unsigned int geom_id) const -> bool { return geom_id == neurites_id_; }
 
@@ -59,9 +59,11 @@ public:
     ray_hit.ray.org_x = org[0];
     ray_hit.ray.org_y = org[1];
     ray_hit.ray.org_z = org[2];
+
     ray_hit.ray.dir_x = dir[0];
     ray_hit.ray.dir_y = dir[1];
     ray_hit.ray.dir_z = dir[2];
+
     ray_hit.ray.tfar = static_cast<float>(INFINITY);
 
     ray_hit.ray.mask = -1;

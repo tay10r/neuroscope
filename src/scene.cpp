@@ -19,7 +19,7 @@ Scene::~Scene()
 }
 
 auto
-Scene::from_swc_model(const SWCModel& model) -> bool
+Scene::from_swc_model(const SWCModel& model, const Transform& t) -> bool
 {
   size_t num_neurites = 0;
 
@@ -108,8 +108,8 @@ Scene::from_swc_model(const SWCModel& model) -> bool
         if (num_somas == 1) {
           soma_buffer[soma_offset] = Vec4f{ node->position[0], node->position[1], node->position[2], node->radius };
         } else if (parent != nullptr) {
-          const auto p0 = parent->position;
-          const auto p1 = node->position;
+          const auto p0 = t.apply(parent->position);
+          const auto p1 = t.apply(node->position);
           soma_buffer[soma_offset * 2 + 0] = Vec4f{ p0[0], p0[1], p0[2], parent->radius };
           soma_buffer[soma_offset * 2 + 1] = Vec4f{ p1[0], p1[1], p1[2], node->radius };
           soma_indices[soma_offset] = soma_offset * 2;
@@ -121,8 +121,8 @@ Scene::from_swc_model(const SWCModel& model) -> bool
       case SWCType::AXON:
       case SWCType::UNSPECIFIED_NEURITE:
         if (parent) {
-          const Vec3f p0 = parent->position;
-          const Vec3f p1 = node->position;
+          const Vec3f p0 = t.apply(parent->position);
+          const Vec3f p1 = t.apply(node->position);
           neurites_buffer[neurites_offset * 2 + 0] = Vec4f{ p0[0], p0[1], p0[2], parent->radius };
           neurites_buffer[neurites_offset * 2 + 1] = Vec4f{ p1[0], p1[1], p1[2], node->radius };
           neurites_indices[neurites_offset] = neurites_offset * 2;
