@@ -112,10 +112,16 @@ class GenericFluorescentMicroscope : public MicroscopeBase
 
   float vertical_fov_{ 100.0F };
 
-  float distance_per_slice_{ 5.0F };
+  float distance_per_slice_{ 2.0F };
+
+  float axial_fwhm_{ 2.8F };
 
 public:
-  GenericFluorescentMicroscope(size_t image_width, size_t image_height, float vertical_fov, float distance_per_slice);
+  GenericFluorescentMicroscope(size_t image_width,
+                               size_t image_height,
+                               float vertical_fov,
+                               float distance_per_slice,
+                               float axial_fwhm);
 
   [[nodiscard]] auto get_sensor() const -> const ImageSensor<uint8_t, 1>& { return sensor_; }
 

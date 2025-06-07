@@ -6,14 +6,14 @@ find_package(OpenMP REQUIRED COMPONENTS CXX)
 find_package(embree REQUIRED)
 
 add_library(neuroscope_cpp
-  core.h
-  core.cpp
-  scene.h
-  scene.cpp
-  microscope.h
-  microscope.cpp
-  swc.h
-  swc.cpp
+  src/core.h
+  src/core.cpp
+  src/scene.h
+  src/scene.cpp
+  src/microscope.h
+  src/microscope.cpp
+  src/swc.h
+  src/swc.cpp
 )
 
 if(COMPILER_WARNINGS_ENABLED)
@@ -48,7 +48,7 @@ FetchContent_Declare(pybind11
 )
 FetchContent_MakeAvailable(pybind11)
 
-pybind11_add_module(neuroscope python.cpp)
+pybind11_add_module(neuroscope src/python.cpp)
 
 target_link_libraries(neuroscope PUBLIC neuroscope_cpp)
 

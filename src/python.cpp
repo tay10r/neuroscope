@@ -54,7 +54,7 @@ PYBIND11_MODULE(neuroscope, m)
     .def(py::init<size_t, size_t, float, float>(),
          py::arg("image_width") = 640,
          py::arg("image_height") = 480,
-         py::arg("vertical_fov") = 100,
+         py::arg("vertical_fov") = 500,
          py::arg("elevation") = 100)
     .def("image_size",
          [](const DebugMicroscope& self) -> py::tuple {
@@ -69,11 +69,12 @@ PYBIND11_MODULE(neuroscope, m)
     });
 
   py::class_<GenericFluorescentMicroscope, Microscope>(m, "GenericFluorescentMicroscope")
-    .def(py::init<size_t, size_t, float, float>(),
+    .def(py::init<size_t, size_t, float, float, float>(),
          py::arg("image_width") = 640,
          py::arg("image_height") = 480,
-         py::arg("vertical_fov") = 100,
-         py::arg("distance_per_slice") = 2.5F)
+         py::arg("vertical_fov") = 500,
+         py::arg("distance_per_slice") = 2.5F,
+         py::arg("axial_fwhm") = 2.0F)
     .def("image_size",
          [](const GenericFluorescentMicroscope& self) -> py::tuple {
            const auto& sensor = self.get_sensor();

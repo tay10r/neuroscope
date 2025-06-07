@@ -4,8 +4,6 @@
 #include "scene.h"
 #include "swc.h"
 
-#include <random>
-
 #include <stdio.h>
 
 MicroscopeBase::MicroscopeBase()
@@ -72,6 +70,7 @@ DebugMicroscope::capture_impl(const Scene& scene)
   const auto y_scale{ 1.0F / static_cast<float>(h) };
   const auto aspect{ static_cast<float>(w) / static_cast<float>(h) };
   const auto fov{ vertical_fov_ * 0.5F };
+  const auto max_spp{ 16 };
 
 #pragma omp parallel for
 
@@ -81,31 +80,37 @@ DebugMicroscope::capture_impl(const Scene& scene)
 
     for (size_t x = 0; x < w; x++) {
 
-      const auto u = static_cast<float>(x) * x_scale;
-      const auto v = static_cast<float>(y) * y_scale;
+      int r{ 0 };
+      int g{ 0 };
+      int b{ 255 };
 
-      const auto px = (u * 2.0F - 1.0F) * fov * aspect;
-      const auto py = (v * 2.0F - 1.0F) * fov;
+      Random rng(y * w + x);
 
-      const auto isect = scene.intersect1(Vec3f{ px, py, elevation_ }, Vec3f{ 0, 0, -1 });
+      for (int i = 0; i < max_spp; i++) {
+
+        const auto u = (static_cast<float>(x) + rng.next_float()) * x_scale;
+        const auto v = (static_cast<float>(y) + rng.next_float()) * y_scale;
+
+        const auto px = (u * 2.0F - 1.0F) * fov * aspect;
+        const auto py = (v * 2.0F - 1.0F) * fov;
+
+        const auto isect = scene.intersect1(Vec3f{ px, py, elevation_ }, Vec3f{ 0, 0, -1 });
+
+        if (isect.hit.geomID != RTC_INVALID_GEOMETRY_ID) {
+          b = 0;
+          if (scene.is_neurite(isect.hit.geomID)) {
+            g = 255;
+          } else {
+            r = 255;
+          }
+          break;
+        }
+      }
 
       auto* pixel = row + x * 3;
-
-      if (isect.hit.geomID != RTC_INVALID_GEOMETRY_ID) {
-        if (scene.is_neurite(isect.hit.geomID)) {
-          pixel[0] = 0;
-          pixel[1] = 255;
-          pixel[2] = 0;
-        } else {
-          pixel[0] = 255;
-          pixel[1] = 0;
-          pixel[2] = 0;
-        }
-      } else {
-        pixel[0] = 0;
-        pixel[1] = 0;
-        pixel[2] = 255;
-      }
+      pixel[0] = r;
+      pixel[1] = g;
+      pixel[2] = b;
     }
   }
 }
@@ -113,10 +118,12 @@ DebugMicroscope::capture_impl(const Scene& scene)
 GenericFluorescentMicroscope::GenericFluorescentMicroscope(size_t image_width,
                                                            size_t image_height,
                                                            float vertical_fov,
-                                                           float distance_per_slice)
+                                                           float distance_per_slice,
+                                                           float axial_fwhm)
   : sensor_(image_width, image_height)
   , vertical_fov_(vertical_fov)
   , distance_per_slice_(distance_per_slice)
+  , axial_fwhm_(axial_fwhm)
 {
 }
 
@@ -131,13 +138,10 @@ GenericFluorescentMicroscope::capture_impl(const Scene& scene)
   const auto y_scale{ 1.0F / static_cast<float>(h) };
   const auto aspect{ static_cast<float>(w) / static_cast<float>(h) };
   const auto fov{ vertical_fov_ * 0.5F };
-  constexpr auto spp{ 32 };
+  constexpr auto spp{ 16 };
 
   const auto bounds = scene.get_bounds();
-
-  const int num_slices = static_cast<int>((bounds.upper_z - bounds.lower_z) / distance_per_slice_);
-  constexpr float axial_FWHM = 2.8f; // µm (tweak!)
-  const float sigma_z = axial_FWHM / (2.0f * sqrtf(2.0f * logf(2.0f)));
+  const auto z_scale = 1.0F / (bounds.upper_z - bounds.lower_z);
 
 #pragma omp parallel for
 
@@ -147,51 +151,32 @@ GenericFluorescentMicroscope::capture_impl(const Scene& scene)
 
     for (size_t x = 0; x < w; x++) {
 
-      std::seed_seq seed{ static_cast<int>(x), static_cast<int>(y) };
+      Random rng(x + y * w);
 
-      std::minstd_rand rng(seed);
+      float intensity_sum{ 0.0F };
 
-      float max_intensity{ 0.0F };
+      for (int j = 0; j < spp; ++j) {
 
-      for (int i = 0; i < num_slices; i++) {
+        const float u = (static_cast<float>(x) + rng.next_float()) * x_scale;
+        const float v = (static_cast<float>(y) + rng.next_float()) * y_scale;
 
-        float intensity_sum{ 0.0F };
+        const float px = (u * 2.0F - 1.0F) * fov * aspect;
+        const float py = (v * 2.0F - 1.0F) * fov;
 
-        const float elevation = bounds.upper_z - i * distance_per_slice_;
+        const Vec3f ray_org{ px, py, bounds.upper_z };
+        const Vec3f ray_dir{ 0, 0, -1 };
 
-        for (auto j = 0; j < spp; j++) {
+        const auto isect = scene.intersect1(ray_org, ray_dir);
 
-          std::normal_distribution<float> dist(0.5F, 1.0F);
+        if (isect.hit.geomID == RTC_INVALID_GEOMETRY_ID)
+          continue;
 
-          const auto u = (static_cast<float>(x) + dist(rng)) * x_scale;
-          const auto v = (static_cast<float>(y) + dist(rng)) * y_scale;
-
-          const auto px = (u * 2.0F - 1.0F) * fov * aspect;
-          const auto py = (v * 2.0F - 1.0F) * fov;
-
-          const Vec3f ray_org{ px, py, elevation };
-          const Vec3f ray_dir{ 0, 0, -1 };
-
-          const auto isect = scene.intersect1(ray_org, ray_dir);
-
-          auto intensity{ 0.0F };
-
-          if (isect.hit.geomID != RTC_INVALID_GEOMETRY_ID) {
-            const float hit_z = ray_org[2] + isect.ray.tfar * ray_dir[2];
-            const float delta_z = hit_z - elevation;
-            const float weight_axial = expf(-0.5F * (delta_z * delta_z) / (sigma_z * sigma_z));
-            intensity = weight_axial;
-          }
-
-          intensity_sum += intensity;
-        }
-
-        const auto intensity = intensity_sum * (1.0F / static_cast<float>(spp));
-
-        max_intensity = (intensity > max_intensity) ? intensity : max_intensity;
+        intensity_sum += 1.0F - isect.ray.tfar * z_scale;
       }
 
-      row[x] = static_cast<int>(max_intensity * 255);
+      const float intensity_avg = intensity_sum * (1.0F / static_cast<float>(spp));
+
+      row[x] = static_cast<int>(intensity_avg * 255);
     }
   }
 }
